@@ -17,8 +17,8 @@ function setupEventListeners() {
     if (pdfFileInput) {
         pdfFileInput.addEventListener('change', handleFileSelect);
     }
-    
-    // Drag and drop
+        
+        // Drag and drop
     const uploadArea = document.getElementById('uploadArea');
     if (uploadArea) {
         uploadArea.addEventListener('dragover', handleDragOver);
@@ -85,21 +85,21 @@ async function uploadFile(file) {
     
     // Show upload status
     showUploadStatus('Starting upload...', 10);
-    
-    const formData = new FormData();
-    formData.append('file', file);
+
+        const formData = new FormData();
+        formData.append('file', file);
     if (password) {
         formData.append('password', password);
     }
-    
-    try {
+
+        try {
         showUploadStatus('Processing PDF...', 30);
         
-        const response = await fetch('/upload-pdf/', {
-            method: 'POST',
-            body: formData
-        });
-        
+            const response = await fetch('/upload-pdf/', {
+                method: 'POST',
+                body: formData
+            });
+
         if (response.ok) {
             const result = await response.json();
             showUploadStatus('Upload successful!', 100);
@@ -272,15 +272,15 @@ async function deleteDocument(docId) {
         const response = await fetch(`/documents/${docId}`, {
             method: 'DELETE'
         });
-        
-        if (response.ok) {
+
+            if (response.ok) {
             showNotification('Document deleted successfully', 'success');
             loadDocuments();
-        } else {
+            } else {
             const error = await response.json();
             showNotification(error.detail || 'Failed to delete document', 'error');
-        }
-    } catch (error) {
+            }
+        } catch (error) {
         console.error('Failed to delete document:', error);
         showNotification('Failed to delete document', 'error');
     }
@@ -292,54 +292,54 @@ async function sendMessage() {
     if (!input) return;
     
     const message = input.value.trim();
-    if (!message) return;
-    
-    // Add user message to chat
+        if (!message) return;
+
+        // Add user message to chat
     addMessage(message, true);
     input.value = '';
     autoResizeTextarea();
-    
+
     // Show loading message
     const loadingId = addLoadingMessage();
-    
-    try {
-        const response = await fetch('/query/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                question: message,
+
+        try {
+            const response = await fetch('/query/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    question: message,
                 conversation_id: conversationId
-            })
-        });
-        
+                })
+            });
+
         if (response.ok) {
             const result = await response.json();
-            
-            // Remove loading message
+
+                // Remove loading message
             removeLoadingMessage(loadingId);
-            
-            // Add AI response
+                
+                // Add AI response
             addMessage(result.response, false);
-            
+                
             // Update conversation ID
-            if (result.conversation_id) {
+                if (result.conversation_id) {
                 conversationId = result.conversation_id;
-            }
+                }
             
-        } else {
+            } else {
             const error = await response.json();
             removeLoadingMessage(loadingId);
             addMessage(`Error: ${error.detail}`, false);
-        }
+            }
         
-    } catch (error) {
+        } catch (error) {
         console.error('Query error:', error);
         removeLoadingMessage(loadingId);
         addMessage('Sorry, I encountered an error. Please try again.', false);
+        }
     }
-}
 
 // Add message to chat
 function addMessage(text, isUser) {
@@ -351,6 +351,13 @@ function addMessage(text, isUser) {
     
     const timestamp = new Date().toLocaleTimeString();
     
+    // Format AI message text for better readability
+    let formattedText = text;
+    if (!isUser) {
+        // Clean up and format AI responses
+        formattedText = formatAIResponse(text);
+    }
+    
     messageDiv.innerHTML = `
         <div class="message-avatar">
             <i class="fas fa-${isUser ? 'user' : 'robot'}"></i>
@@ -360,7 +367,7 @@ function addMessage(text, isUser) {
                 <strong>${isUser ? 'You' : 'Tuterby AI'}</strong>
                 <span class="message-time">${timestamp}</span>
             </div>
-            <div class="message-text">${text}</div>
+            <div class="message-text">${formattedText}</div>
         </div>
     `;
     
@@ -368,12 +375,31 @@ function addMessage(text, isUser) {
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
+// Format AI response for better display
+function formatAIResponse(text) {
+    if (!text) return '';
+    
+    // Replace bullet points with proper HTML
+    let formatted = text
+        .replace(/•/g, '<span class="bullet-point">•</span>')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>');
+    
+    // Wrap in paragraphs for better structure
+    formatted = `<p>${formatted}</p>`;
+    
+    // Clean up empty paragraphs
+    formatted = formatted.replace(/<p><\/p>/g, '');
+    
+    return formatted;
+}
+
 // Add loading message
 function addLoadingMessage() {
     const chatMessages = document.getElementById('chatMessages');
     if (!chatMessages) return null;
     
-    const loadingDiv = document.createElement('div');
+            const loadingDiv = document.createElement('div');
     const loadingId = 'loading-' + Date.now();
     loadingDiv.id = loadingId;
     loadingDiv.className = 'message ai-message';

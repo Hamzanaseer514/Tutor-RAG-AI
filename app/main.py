@@ -27,7 +27,7 @@ load_dotenv()
 from app import models, schemas, database
 from app.pdf_processor import PDFProcessor  # Use absolute import
 from app.vector_store import VectorStore
-from app.grok_integration import GrokIntegration
+from app.grok_integration import DeepSeekIntegration
 
 app = FastAPI(
     title="Tuterby RAG System",
@@ -48,7 +48,7 @@ templates = Jinja2Templates(directory="templates")
 # Initialize with smaller chunk sizes for better memory management
 pdf_processor = PDFProcessor(chunk_size=300, chunk_overlap=50)
 vector_store = VectorStore()
-grok_integration = GrokIntegration()
+deepseek_integration = DeepSeekIntegration()
 
 def get_db():
     db = database.SessionLocal()
@@ -277,7 +277,7 @@ async def query_document(
                     role = "user" if msg.is_user else "assistant"
                     history.append({"role": role, "content": msg.message})
             
-            response = grok_integration.generate_response(question, context, history)
+            response = deepseek_integration.generate_response(question, context, history)
             logger.info(f"Generated response: {len(response)} characters")
             
         except Exception as e:

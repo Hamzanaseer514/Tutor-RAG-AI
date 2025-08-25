@@ -51,129 +51,99 @@ class PDFProcessor:
         return chunks
     
     def _extract_text_from_pdf(self, file_path: str, password: str = None) -> str:
+        """Extract text from PDF using multiple methods"""
         text = ""
         
-        # Try PyMuPDF first (best text extraction)
+        # Method 1: Try PyMuPDF (fitz) first - most reliable
         try:
-            logger.info("Trying PyMuPDF for text extraction...")
+            logger.info("Trying PyMuPDF text extraction...")
+            import fitz
             doc = fitz.open(file_path)
-            if doc.needs_pass:
-                if password:
-                    doc.authenticate(password)
-                else:
-                    raise ValueError("PDF is password-protected. Please provide a password.")
+            if password:
+                doc.authenticate(password)
             
             for page_num in range(len(doc)):
-                if page_num % 10 == 0:
-                    logger.info(f"Processing page {page_num+1}/{len(doc)} with PyMuPDF")
                 page = doc.load_page(page_num)
                 page_text = page.get_text()
-                if page_text:
+                if page_text.strip():
                     text += page_text + "\n"
-                
-                # Check if text is getting too long and truncate if necessary
-                if len(text) > 1000000:  # 1MB limit
-                    logger.warning("Text too long, truncating to prevent memory issues")
-                    text = text[:1000000]
-                    break
             
             doc.close()
-            
-            if len(text.strip()) > 100:
-                logger.info("PyMuPDF extraction successful")
-                return text
-                
+            if text.strip():
+                logger.info("PyMuPDF text extraction successful")
+                return text.strip()
+            else:
+                logger.warning("PyMuPDF extracted empty text")
         except Exception as e:
             logger.warning(f"PyMuPDF failed: {str(e)}")
         
-        # Try pdfplumber as fallback
+        # Method 2: Try PyPDF2
         try:
-            logger.info("Trying pdfplumber for text extraction...")
-            with pdfplumber.open(file_path) as pdf:
-                for i, page in enumerate(pdf.pages):
-                    if i % 10 == 0:
-                        logger.info(f"Processing page {i+1}/{len(pdf.pages)} with pdfplumber")
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
-                    
-                    # Check text length limit
-                    if len(text) > 1000000:
-                        logger.warning("Text too long, truncating to prevent memory issues")
-                        text = text[:1000000]
-                        break
-            
-            if len(text.strip()) > 100:
-                logger.info("pdfplumber extraction successful")
-                return text
-                
-        except Exception as e:
-            logger.warning(f"pdfplumber failed: {str(e)}")
-        
-        # Try PyPDF2 as fallback
-        try:
-            logger.info("Trying PyPDF2 for text extraction...")
+            logger.info("Trying PyPDF2 text extraction...")
+            import PyPDF2
             with open(file_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                if pdf_reader.is_encrypted:
-                    try:
-                        pdf_reader.decrypt(password or "")
-                    except Exception as e:
-                        logger.error(f"PDF decryption failed: {str(e)}")
-                        raise ValueError("PDF is password-protected and provided password is incorrect.")
+                reader = PyPDF2.PdfReader(file)
+                if password:
+                    reader.decrypt(password)
                 
-                total_pages = len(pdf_reader.pages)
-                for i, page in enumerate(pdf_reader.pages):
-                    if i % 10 == 0:
-                        logger.info(f"Processing page {i+1}/{total_pages} with PyPDF2")
+                for page in reader.pages:
                     page_text = page.extract_text()
                     if page_text:
                         text += page_text + "\n"
-                    
-                    # Check text length limit
-                    if len(text) > 1000000:
-                        logger.warning("Text too long, truncating to prevent memory issues")
-                        text = text[:1000000]
-                        break
             
-            if len(text.strip()) > 100:
-                logger.info("PyPDF2 extraction successful")
-                return text
-                
+            if text.strip():
+                logger.info("PyPDF2 text extraction successful")
+                return text.strip()
+            else:
+                logger.warning("PyPDF2 extracted empty text")
         except Exception as e:
             logger.warning(f"PyPDF2 failed: {str(e)}")
         
-        # Try OCR as last resort
-        if len(text.strip()) < 100:
-            logger.info("Text extraction methods failed, trying Tesseract OCR...")
-            try:
-                images = convert_from_path(file_path)
-                for i, image in enumerate(images):
-                    if i % 10 == 0:
-                        logger.info(f"Processing page {i+1}/{len(images)} with OCR")
-                    # Enhance image for better OCR
-                    image = ImageEnhance.Contrast(image).enhance(2.0)
-                    image = ImageEnhance.Sharpness(image).enhance(1.5)
-                    page_text = pytesseract.image_to_string(image, lang='eng+urd')
+        # Method 3: Try pdfplumber
+        try:
+            logger.info("Trying pdfplumber text extraction...")
+            import pdfplumber
+            with pdfplumber.open(file_path, password=password) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
                     if page_text:
                         text += page_text + "\n"
-                    
-                    # Check text length limit
-                    if len(text) > 1000000:
-                        logger.warning("Text too long, truncating to prevent memory issues")
-                        text = text[:1000000]
-                        break
-                        
-                logger.info("OCR processing completed")
-                
-            except Exception as e:
-                logger.error(f"OCR processing failed: {str(e)}")
-                raise ValueError(f"All text extraction methods failed. OCR error: {str(e)}")
+            
+            if text.strip():
+                logger.info("pdfplumber text extraction successful")
+                return text.strip()
+            else:
+                logger.warning("pdfplumber extracted empty text")
+        except Exception as e:
+            logger.warning(f"pdfplumber failed: {str(e)}")
         
-        if len(text.strip()) < 100:
-            raise ValueError("Could not extract sufficient text from PDF. The document might be corrupted or contain only images.")
+        # Method 4: OCR (DISABLED - requires Poppler)
+        # try:
+        #     logger.info("Trying OCR text extraction...")
+        #     from pdf2image import convert_from_path
+        #     import pytesseract
+        #     
+        #     images = convert_from_path(file_path)
+        #     ocr_text = ""
+        #     
+        #     for i, image in enumerate(images):
+        #         page_text = pytesseract.image_to_string(image)
+        #         if page_text.strip():
+        #             ocr_text += f"Page {i+1}:\n{page_text}\n\n"
+        #     
+        #     if ocr_text.strip():
+        #         logger.info("OCR text extraction successful")
+        #         return ocr_text.strip()
+        #     else:
+        #         logger.warning("OCR extracted empty text")
+        # except Exception as e:
+        #     logger.warning(f"OCR failed: {str(e)}")
         
-        return text
+        # If all methods failed
+        if not text.strip():
+            raise ValueError("All text extraction methods failed. The PDF might be scanned, protected, or corrupted.")
+        
+        return text.strip()
     
     def _clean_text(self, text: str) -> str:
         """Clean and preprocess extracted text"""

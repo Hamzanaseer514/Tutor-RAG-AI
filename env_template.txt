@@ -1,14 +1,28 @@
-# Tuterby AI Configuration
+# 🚀 Tuterby AI - Environment Configuration
 # Copy this file to .env and fill in your actual values
 
-# Grok AI API Key (get from https://openrouter.ai/)
-GROK_API_KEY=your_openrouter_api_key_here
+# 🔑 REQUIRED: Your OpenRouter API Key for AI access
+# Get this from: https://openrouter.ai/
+# You can use either DeepSeek (recommended) or Grok
+DEEPSEEK_API_KEY=your_openrouter_api_key_here
+# OR keep the old name for compatibility
+# GROK_API_KEY=your_openrouter_api_key_here
 
-# Database Configuration
-DATABASE_URL=sqlite:///./tuterby.db
+# 🗄️ Database Configuration (Optional - defaults work for most users)
+DATABASE_URL=sqlite:///tuterby.db
 
-# ChromaDB Configuration
+# 📊 Vector Database Path (Optional - defaults work for most users)
 CHROMA_DB_PATH=./chroma_db
 
-# Optional: Logging Level
+# 📝 Logging Level (Optional - INFO is recommended)
 LOG_LEVEL=INFO
+
+# 💡 TIP: Make sure there are NO spaces around the = sign
+# ✅ CORRECT: DEEPSEEK_API_KEY=sk-or-v1-abc123
+# ❌ WRONG:  DEEPSEEK_API_KEY = sk-or-v1-abc123
+
+# 🚀 NEW: DeepSeek R1 Model (Much Better Than Grok!)
+# - More powerful reasoning
+# - Better document understanding
+# - Professional business responses
+# - Free tier available on OpenRouter
