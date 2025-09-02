@@ -292,54 +292,191 @@ async function sendMessage() {
     if (!input) return;
     
     const message = input.value.trim();
-        if (!message) return;
+    if (!message) return;
 
-        // Add user message to chat
+    // Add user message to chat
     addMessage(message, true);
     input.value = '';
     autoResizeTextarea();
 
-    // Show loading message
-    const loadingId = addLoadingMessage();
+    // Show brief loading state first
+    const loadingId = addBriefLoadingState();
 
-        try {
-            const response = await fetch('/query/', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    question: message,
+    try {
+        // Use streaming endpoint for real-time response
+        const response = await fetch('/query-stream/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                question: message,
                 conversation_id: conversationId
-                })
-            });
+            })
+        });
 
         if (response.ok) {
-            const result = await response.json();
-
-                // Remove loading message
-            removeLoadingMessage(loadingId);
-                
-                // Add AI response
-            addMessage(result.response, false);
-                
-            // Update conversation ID
-                if (result.conversation_id) {
-                conversationId = result.conversation_id;
-                }
+            // Remove loading state and show typing indicator
+            removeBriefLoadingState(loadingId);
+            const typingId = addTypingIndicator();
             
-            } else {
+            // Handle streaming response
+            await handleStreamingResponse(response, typingId);
+        } else {
             const error = await response.json();
-            removeLoadingMessage(loadingId);
+            removeBriefLoadingState(loadingId);
             addMessage(`Error: ${error.detail}`, false);
-            }
-        
-        } catch (error) {
-        console.error('Query error:', error);
-        removeLoadingMessage(loadingId);
-        addMessage('Sorry, I encountered an error. Please try again.', false);
         }
+        
+    } catch (error) {
+        console.error('Query error:', error);
+        removeBriefLoadingState(loadingId);
+        addMessage('Sorry, I encountered an error. Please try again.', false);
     }
+}
+
+// Handle streaming response with typing effect
+async function handleStreamingResponse(response, typingId) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentResponse = '';
+    let conversationIdReceived = false;
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.slice(6));
+                        
+                        switch (data.type) {
+                            case 'conversation_id':
+                                if (data.conversation_id) {
+                                    conversationId = data.conversation_id;
+                                    conversationIdReceived = true;
+                                }
+                                break;
+                                
+                            case 'typing':
+                                if (data.status === 'start') {
+                                    // Typing started
+                                } else if (data.status === 'end') {
+                                    // Typing ended
+                                }
+                                break;
+                                
+                            case 'content':
+                                // Add content word by word for realistic typing
+                                if (data.chunk) {
+                                    currentResponse += data.chunk;
+                                    updateTypingResponse(typingId, currentResponse);
+                                    
+                                    // Smooth scrolling
+                                    const chatMessages = document.getElementById('chatMessages');
+                                    if (chatMessages) {
+                                        chatMessages.scrollTop = chatMessages.scrollHeight;
+                                    }
+                                }
+                                break;
+                                
+                            case 'complete':
+                                // Response complete - finalize the message
+                                finalizeTypingResponse(typingId, data.response);
+                                return;
+                        }
+                    } catch (parseError) {
+                        console.error('Error parsing streaming data:', parseError);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Streaming error:', error);
+        finalizeTypingResponse(typingId, 'Sorry, I encountered an error while streaming the response. Please try again.');
+    } finally {
+        reader.releaseLock();
+    }
+}
+
+
+
+// Add typing indicator
+function addTypingIndicator() {
+    const chatMessages = document.getElementById('chatMessages');
+    if (!chatMessages) return null;
+    
+    const typingDiv = document.createElement('div');
+    const typingId = 'typing-' + Date.now();
+    typingDiv.id = typingId;
+    typingDiv.className = 'message ai-message typing-message';
+    
+    typingDiv.innerHTML = `
+        <div class="message-avatar">
+            <i class="fas fa-robot"></i>
+        </div>
+        <div class="message-content">
+            <div class="message-header">
+                <strong>Tuterby AI</strong>
+                <span class="message-time">${new Date().toLocaleTimeString()}</span>
+            </div>
+            <div class="message-text">
+                <div class="typing-indicator">
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                </div>
+                <div class="typing-text" style="display: none;"></div>
+            </div>
+        </div>
+    `;
+    
+    chatMessages.appendChild(typingDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return typingId;
+}
+
+
+
+// Update typing response text
+function updateTypingResponse(typingId, text) {
+    const typingDiv = document.getElementById(typingId);
+    if (!typingDiv) return;
+    
+    const typingText = typingDiv.querySelector('.typing-text');
+    if (typingText) {
+        // Simple text update for smooth typing
+        typingText.textContent = text;
+        typingText.style.display = 'block';
+    }
+}
+
+// Finalize typing response and convert to regular message
+function finalizeTypingResponse(typingId, finalResponse) {
+    const typingDiv = document.getElementById(typingId);
+    if (!typingDiv) return;
+    
+    // Remove the typing message
+    typingDiv.remove();
+    
+    // Add the final formatted message
+    addMessage(finalResponse, false);
+}
+
+// Remove typing indicator
+function removeTypingIndicator(typingId) {
+    const typingDiv = document.getElementById(typingId);
+    if (typingDiv) {
+        typingDiv.remove();
+    }
+}
 
 // Add message to chat
 function addMessage(text, isUser) {
@@ -394,43 +531,7 @@ function formatAIResponse(text) {
     return formatted;
 }
 
-// Add loading message
-function addLoadingMessage() {
-    const chatMessages = document.getElementById('chatMessages');
-    if (!chatMessages) return null;
-    
-            const loadingDiv = document.createElement('div');
-    const loadingId = 'loading-' + Date.now();
-    loadingDiv.id = loadingId;
-    loadingDiv.className = 'message ai-message';
-    
-    loadingDiv.innerHTML = `
-        <div class="message-avatar">
-            <i class="fas fa-robot"></i>
-        </div>
-        <div class="message-content">
-            <div class="message-header">
-                <strong>Tuterby AI</strong>
-                <span class="message-time">${new Date().toLocaleTimeString()}</span>
-            </div>
-            <div class="message-text">
-                <i class="fas fa-spinner fa-spin"></i> Thinking...
-            </div>
-        </div>
-    `;
-    
-    chatMessages.appendChild(loadingDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-    return loadingId;
-}
 
-// Remove loading message
-function removeLoadingMessage(loadingId) {
-    const loadingDiv = document.getElementById(loadingId);
-    if (loadingDiv) {
-        loadingDiv.remove();
-    }
-}
 
 // Start new chat
 function startNewChat() {
@@ -608,3 +709,45 @@ const notificationStyles = `
 const styleSheet = document.createElement('style');
 styleSheet.textContent = notificationStyles;
 document.head.appendChild(styleSheet);
+
+// Add brief loading state
+function addBriefLoadingState() {
+    const chatMessages = document.getElementById('chatMessages');
+    if (!chatMessages) return null;
+    
+    const loadingDiv = document.createElement('div');
+    const loadingId = 'loading-' + Date.now();
+    loadingDiv.id = loadingId;
+    loadingDiv.className = 'message ai-message loading-message';
+    
+    loadingDiv.innerHTML = `
+        <div class="message-avatar">
+            <i class="fas fa-robot"></i>
+        </div>
+        <div class="message-content">
+            <div class="message-header">
+                <strong>Tuterby AI</strong>
+                <span class="message-time">${new Date().toLocaleTimeString()}</span>
+            </div>
+            <div class="message-text">
+                <div class="loading-dots">
+                    <span class="loading-dot"></span>
+                    <span class="loading-dot"></span>
+                    <span class="loading-dot"></span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    chatMessages.appendChild(loadingDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return loadingId;
+}
+
+// Remove brief loading state
+function removeBriefLoadingState(loadingId) {
+    const loadingDiv = document.getElementById(loadingId);
+    if (loadingDiv) {
+        loadingDiv.remove();
+    }
+}

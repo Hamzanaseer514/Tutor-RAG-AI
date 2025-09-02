@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from openai import OpenAI
 from typing import List, Dict, Any
 
@@ -34,8 +35,89 @@ class DeepSeekIntegration:
             self.fallback_mode = True
             logger.info("DeepSeekIntegration running in fallback mode")
     
+    async def generate_response_async(self, question: str, context: str, history: list = None) -> str:
+        """Generate a professional response asynchronously based on company documents using DeepSeek R1"""
+        
+        # Check if we're in fallback mode
+        if self.fallback_mode or not self.client:
+            return self._generate_fallback_response(question, context)
+        
+        # Enhanced system prompt for professional company knowledge base
+        system_prompt = """You are Tuterby AI, a professional company knowledge assistant powered by DeepSeek R1. Your role is to provide accurate, well-formatted, and professional responses based on company documents.
+
+IMPORTANT GUIDELINES:
+1. Always base your answers on the provided context - only use information from the company documents
+2. Format responses professionally with clear structure, bullet points, and proper spacing
+3. Be comprehensive - provide detailed explanations, not just brief answers
+4. Use professional language suitable for business environments
+5. If information is not in the context, clearly state that and suggest what documents might contain it
+6. Structure your response with clear headings, bullet points, and organized information
+7. Provide actionable insights when possible
+8. Maintain consistency with company terminology and procedures
+9. Use DeepSeek's advanced reasoning to provide intelligent analysis and connections
+
+RESPONSE FORMAT:
+- Start with a clear, direct answer to the question
+- Use bullet points (•) for lists and key information
+- Organize information logically with clear sections
+- Use professional business language
+- End with a summary or next steps if applicable
+- DO NOT use markdown formatting like **bold** or *italic*
+- Use clean, readable text with proper spacing
+
+CONTEXT FROM COMPANY DOCUMENTS:
+{context}
+
+CONVERSATION HISTORY:
+{history}
+
+USER QUESTION: {question}
+
+Please provide a professional, well-formatted response based on the company documents using DeepSeek's advanced capabilities."""
+        
+        try:
+            # Prepare conversation history for context
+            history_text = ""
+            if history:
+                history_text = "\n".join([f"{'User' if msg['role'] == 'user' else 'Assistant'}: {msg['content']}" for msg in history[-5:]])  # Last 5 messages
+            
+            # Format the prompt
+            formatted_prompt = system_prompt.format(
+                context=context,
+                history=history_text,
+                question=question
+            )
+            
+            # Generate response with optimized parameters for DeepSeek R1
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": formatted_prompt}
+                ],
+                temperature=0.2,  # Lower temperature for more focused, professional responses
+                max_tokens=4000,  # Increased for comprehensive answers
+                top_p=0.9,
+                frequency_penalty=0.1,
+                presence_penalty=0.1
+            )
+            
+            # Extract and format the response
+            ai_response = response.choices[0].message.content.strip()
+            
+            # Ensure proper formatting
+            if not ai_response.startswith('#'):  # If no markdown headers, add structure
+                ai_response = self._format_response(ai_response)
+            
+            return ai_response
+            
+        except Exception as e:
+            logger.error(f"Error generating response: {str(e)}")
+            # Provide a helpful fallback response
+            return self._generate_fallback_response(question, context)
+    
     def generate_response(self, question: str, context: str, history: list = None) -> str:
-        """Generate a professional response based on company documents using DeepSeek R1"""
+        """Generate a professional response based on company documents using DeepSeek R1 (synchronous version for backward compatibility)"""
         
         # Check if we're in fallback mode
         if self.fallback_mode or not self.client:

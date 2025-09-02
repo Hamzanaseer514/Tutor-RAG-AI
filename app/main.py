@@ -1,9 +1,10 @@
 import os
 import uuid
 import logging
+import asyncio
 from datetime import datetime
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends, Request, Form
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from dotenv import load_dotenv
 import PyPDF2
 import psutil
 import gc
+import json
 
 # Configure real-time logging
 logging.basicConfig(
@@ -327,6 +329,157 @@ async def query_document(
         raise
     except Exception as e:
         logger.error(f"Unexpected error in query: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+@app.post("/query-stream/")
+async def query_document_stream(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Streaming endpoint for real-time chat responses with typing effect"""
+    try:
+        body = await request.json()
+        question = body.get("question", "").strip()
+        conversation_id = body.get("conversation_id")
+        
+        if not question:
+            raise HTTPException(status_code=400, detail="Question is required")
+        
+        logger.info(f"Processing streaming question: {question}")
+        
+        # Search for relevant context in vector store
+        try:
+            search_results = vector_store.search(question, top_k=3)
+            logger.info(f"Found {len(search_results)} relevant chunks")
+        except Exception as e:
+            logger.error(f"Vector search failed: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to search document content")
+        
+        # Prepare context from search results
+        if search_results and search_results[0][0] != "No documents have been processed yet. Please upload a PDF first.":
+            context = "\n\n".join([chunk for chunk, _, _ in search_results])
+            logger.info(f"Context length: {len(context)} characters")
+        else:
+            context = "No relevant documents found. Please upload a PDF first."
+            logger.info("No documents available for context")
+        
+        # Store conversation in database
+        if not conversation_id:
+            conversation_id = str(uuid.uuid4())
+        
+        try:
+            # Store user question
+            user_msg = models.Conversation(
+                conversation_id=conversation_id,
+                message=question,
+                is_user=True,
+                timestamp=datetime.utcnow()
+            )
+            db.add(user_msg)
+            db.commit()
+            logger.info(f"User question stored with ID: {conversation_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to store user question: {str(e)}")
+        
+        async def generate_stream():
+            """Generate streaming response with real-time typing effect"""
+            # Send conversation ID first
+            yield f"data: {json.dumps({'type': 'conversation_id', 'conversation_id': conversation_id})}\n\n"
+            
+            # Send typing indicator
+            yield f"data: {json.dumps({'type': 'typing', 'status': 'start'})}\n\n"
+            
+            # Simulate thinking delay
+            await asyncio.sleep(0.3)
+            
+            try:
+                # Generate response using Grok AI
+                history = []
+                if conversation_id:
+                    db_messages = db.query(models.Conversation).filter(
+                        models.Conversation.conversation_id == conversation_id
+                    ).order_by(models.Conversation.timestamp).limit(10).all()
+                    
+                    for msg in db_messages:
+                        role = "user" if msg.is_user else "assistant"
+                        history.append({"role": role, "content": msg.message})
+                
+                response = await deepseek_integration.generate_response_async(question, context, history)
+                logger.info(f"Generated streaming response: {len(response)} characters")
+                
+                # Split response into words for smooth typing
+                words = response.split()
+                
+                # Send words one by one for realistic typing effect
+                for i, word in enumerate(words):
+                    # Add space after each word except the last one
+                    if i < len(words) - 1:
+                        chunk = word + " "
+                    else:
+                        chunk = word
+                    
+                    yield f"data: {json.dumps({'type': 'content', 'chunk': chunk})}\n\n"
+                    
+                    # Smooth typing speed - faster for better UX
+                    await asyncio.sleep(0.05)  # 50ms between words
+                
+                # Send typing end
+                yield f"data: {json.dumps({'type': 'typing', 'status': 'end'})}\n\n"
+                
+                # Send complete response
+                yield f"data: {json.dumps({'type': 'complete', 'response': response})}\n\n"
+                
+                # Store AI response in database
+                try:
+                    ai_msg = models.Conversation(
+                        conversation_id=conversation_id,
+                        message=response,
+                        is_user=False,
+                        timestamp=datetime.utcnow()
+                    )
+                    db.add(ai_msg)
+                    db.commit()
+                    logger.info(f"AI response stored for conversation: {conversation_id}")
+                except Exception as e:
+                    logger.error(f"Failed to store AI response: {str(e)}")
+                
+            except Exception as e:
+                logger.error(f"Grok AI generation failed: {str(e)}")
+                error_response = "I apologize, but I'm having trouble generating a response right now. Please try again later."
+                
+                # Send error response
+                yield f"data: {json.dumps({'type': 'content', 'chunk': error_response})}\n\n"
+                yield f"data: {json.dumps({'type': 'typing', 'status': 'end'})}\n\n"
+                yield f"data: {json.dumps({'type': 'complete', 'response': error_response})}\n\n"
+                
+                # Store error response in database
+                try:
+                    ai_msg = models.Conversation(
+                        conversation_id=conversation_id,
+                        message=error_response,
+                        is_user=False,
+                        timestamp=datetime.utcnow()
+                    )
+                    db.add(ai_msg)
+                    db.commit()
+                except Exception as db_error:
+                    logger.error(f"Failed to store error response: {str(db_error)}")
+        
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Content-Type": "text/event-stream"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in streaming query: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 @app.get("/documents/")
