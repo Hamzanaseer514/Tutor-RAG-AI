@@ -1,14 +1,20 @@
 import PyPDF2
 import pdfplumber
-from pdf2image import convert_from_path
-import pytesseract
-from PIL import Image, ImageEnhance
 from typing import List
 import logging
 import io
 import gc
 import re
 import fitz  # PyMuPDF for better text extraction
+
+# Optional OCR imports (not available on all platforms)
+try:
+    from pdf2image import convert_from_path
+    import pytesseract
+    from PIL import Image, ImageEnhance
+    OCR_AVAILABLE = False  # Disabled by design - enable if poppler/tesseract installed
+except ImportError:
+    OCR_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 

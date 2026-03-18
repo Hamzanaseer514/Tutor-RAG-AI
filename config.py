@@ -25,7 +25,7 @@ class Config:
     GC_FREQUENCY = 100     # Force garbage collection every N chunks
     
     # API Settings
-    GROK_API_KEY = os.getenv("GROK_API_KEY")
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./tuterby.db")
     CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
     
@@ -35,9 +35,7 @@ class Config:
     @classmethod
     def validate(cls):
         """Validate configuration settings"""
-        if not cls.GROK_API_KEY:
-            raise ValueError("GROK_API_KEY environment variable is required")
-        
+        # Gemini key is recommended but not strictly enforced here
         if cls.MAX_FILE_SIZE_MB <= 0:
             raise ValueError("MAX_FILE_SIZE_MB must be positive")
         

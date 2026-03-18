@@ -1,3 +1,13 @@
+
+---
+title: Tuterby AI
+emoji: 📚
+colorFrom: indigo
+colorTo: blue
+sdk: docker
+app_file: app.py
+---
+
 # 🚀 Tuterby AI - Professional Company Knowledge Base
 
 **Transform your company documents into an intelligent, searchable knowledge base powered by AI.**

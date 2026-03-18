@@ -14,24 +14,12 @@ load_dotenv()
 
 def check_environment():
     """Check if required environment variables are set"""
-    # Check for either DeepSeek or Grok API key
-    required_vars = ['DEEPSEEK_API_KEY', 'GROK_API_KEY']
-    missing_vars = []
-    
-    # Check if at least one API key is set
-    has_api_key = False
-    for var in required_vars:
-        if os.getenv(var):
-            has_api_key = True
-            print(f"✅ Found API key: {var}")
-            break
-    
-    if not has_api_key:
+    # Require Gemini API key
+    if not os.getenv('GEMINI_API_KEY'):
         print("❌ Missing required environment variables:")
-        print("   - DEEPSEEK_API_KEY (recommended)")
-        print("   - GROK_API_KEY (alternative)")
-        print("\nPlease create a .env file with at least one API key.")
-        print("See env_template.txt for reference.")
+        print("   - GEMINI_API_KEY")
+        print("\nPlease create a .env file with your Gemini API key.")
+        print("See env_template.txt for reference (GEMINI_API_KEY=...)")
         return False
     
     print("✅ Environment variables configured")

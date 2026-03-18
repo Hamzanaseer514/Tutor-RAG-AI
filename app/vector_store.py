@@ -1,5 +1,79 @@
+import os
+
+# Prevent Transformers from importing TensorFlow (avoids protobuf/tf conflicts)
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+
 import chromadb
 from chromadb.config import Settings
+
+# Compatibility shim for sentence-transformers expecting legacy symbols from huggingface_hub
+try:
+    import huggingface_hub as _hfh  # type: ignore
+
+    # Provide cached_download if missing (map to hf_hub_download)
+    if not hasattr(_hfh, "cached_download"):
+        # Implement a minimal compatible cached_download(url=..., cache_dir=..., force_filename=..., resume_download=...)
+        def _compat_cached_download(*args, **kwargs):  # type: ignore[no-redef]
+            url = kwargs.get("url")
+            if not url and args:
+                # sentence-transformers calls with kwargs, but guard anyway
+                url = args[0]
+            if not url:
+                raise ValueError("cached_download requires 'url'")
+
+            cache_dir = kwargs.get("cache_dir")
+            force_filename = kwargs.get("force_filename")
+            resume_download = kwargs.get("resume_download", False)
+
+            import hashlib
+            import os as _os
+            import requests  # type: ignore
+
+            base_cache = cache_dir or _os.path.join(_os.path.expanduser("~"), ".cache", "huggingface", "hub")
+            _os.makedirs(base_cache, exist_ok=True)
+
+            filename = force_filename or hashlib.md5(url.encode("utf-8")).hexdigest()
+            dest_path = _os.path.join(base_cache, filename)
+
+            if not _os.path.exists(dest_path) or resume_download:
+                with requests.get(url, stream=True, timeout=60) as r:
+                    r.raise_for_status()
+                    with open(dest_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+
+            return dest_path
+
+        _hfh.cached_download = _compat_cached_download  # type: ignore[attr-defined]
+
+    # Provide HfFolder if missing
+    if not hasattr(_hfh, "HfFolder"):
+        try:
+            from huggingface_hub.hf_api import HfFolder as _HfFolder  # type: ignore
+            _hfh.HfFolder = _HfFolder  # type: ignore[attr-defined]
+        except Exception:
+            class _CompatHfFolder:  # minimal shim
+                @staticmethod
+                def get_token():
+                    try:
+                        from huggingface_hub import get_token
+                        return get_token()
+                    except Exception:
+                        return None
+
+                @staticmethod
+                def save_token(token: str):
+                    # no-op; modern API uses login() flow
+                    return None
+
+            _hfh.HfFolder = _CompatHfFolder  # type: ignore[attr-defined]
+except Exception:
+    # If hub not present yet, sentence-transformers install will bring it in
+    pass
+
 from sentence_transformers import SentenceTransformer
 import numpy as np
 import logging

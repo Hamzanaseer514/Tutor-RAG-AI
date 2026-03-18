@@ -276,6 +276,8 @@ async function deleteDocument(docId) {
             if (response.ok) {
             showNotification('Document deleted successfully', 'success');
             loadDocuments();
+            // Reset chat so previous conversation context doesn't persist after deletion
+            startNewChat();
             } else {
             const error = await response.json();
             showNotification(error.detail || 'Failed to delete document', 'error');

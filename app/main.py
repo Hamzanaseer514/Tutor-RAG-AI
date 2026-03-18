@@ -14,6 +14,7 @@ import PyPDF2
 import psutil
 import gc
 import json
+from fastapi.middleware.cors import CORSMiddleware
 
 # Configure real-time logging
 logging.basicConfig(
@@ -29,13 +30,22 @@ load_dotenv()
 from app import models, schemas, database
 from app.pdf_processor import PDFProcessor  # Use absolute import
 from app.vector_store import VectorStore
-from app.grok_integration import DeepSeekIntegration
+from app.gemini_integration import GeminiIntegration
+
+frontend_urls = os.getenv("FRONTEND_URLS")
 
 app = FastAPI(
     title="Tuterby RAG System",
     version="1.0.0",
     docs_url=None,
     redoc_url=None
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=frontend_urls,  # React dev server
+    allow_credentials=True,
+    allow_methods=["*"],   # allow all HTTP methods
+    allow_headers=["*"],   # allow all headers (Content-Type, Authorization, etc.)
 )
 
 @app.on_event("startup")
@@ -50,7 +60,7 @@ templates = Jinja2Templates(directory="templates")
 # Initialize with smaller chunk sizes for better memory management
 pdf_processor = PDFProcessor(chunk_size=300, chunk_overlap=50)
 vector_store = VectorStore()
-deepseek_integration = DeepSeekIntegration()
+gemini_integration = GeminiIntegration()
 
 def get_db():
     db = database.SessionLocal()
@@ -266,7 +276,7 @@ async def query_document(
             context = "No relevant documents found. Please upload a PDF first."
             logger.info("No documents available for context")
         
-        # Generate response using Grok AI
+        # Generate response using Gemini
         try:
             # Prepare conversation history
             history = []
@@ -279,11 +289,11 @@ async def query_document(
                     role = "user" if msg.is_user else "assistant"
                     history.append({"role": role, "content": msg.message})
             
-            response = deepseek_integration.generate_response(question, context, history)
+            response = gemini_integration.generate_response(question, context, history)
             logger.info(f"Generated response: {len(response)} characters")
             
         except Exception as e:
-            logger.error(f"Grok AI generation failed: {str(e)}")
+            logger.error(f"Gemini generation failed: {str(e)}")
             response = "I apologize, but I'm having trouble generating a response right now. Please try again later."
         
         # Store conversation in database
@@ -383,58 +393,41 @@ async def query_document_stream(
             logger.error(f"Failed to store user question: {str(e)}")
         
         async def generate_stream():
-            """Generate streaming response with real-time typing effect"""
+            """Generate streaming response with real-time typing effect from Gemini"""
             # Send conversation ID first
             yield f"data: {json.dumps({'type': 'conversation_id', 'conversation_id': conversation_id})}\n\n"
-            
             # Send typing indicator
             yield f"data: {json.dumps({'type': 'typing', 'status': 'start'})}\n\n"
-            
-            # Simulate thinking delay
-            await asyncio.sleep(0.3)
-            
+
             try:
-                # Generate response using Grok AI
+                # Build history
                 history = []
                 if conversation_id:
                     db_messages = db.query(models.Conversation).filter(
                         models.Conversation.conversation_id == conversation_id
                     ).order_by(models.Conversation.timestamp).limit(10).all()
-                    
                     for msg in db_messages:
                         role = "user" if msg.is_user else "assistant"
                         history.append({"role": role, "content": msg.message})
-                
-                response = await deepseek_integration.generate_response_async(question, context, history)
-                logger.info(f"Generated streaming response: {len(response)} characters")
-                
-                # Split response into words for smooth typing
-                words = response.split()
-                
-                # Send words one by one for realistic typing effect
-                for i, word in enumerate(words):
-                    # Add space after each word except the last one
-                    if i < len(words) - 1:
-                        chunk = word + " "
-                    else:
-                        chunk = word
-                    
-                    yield f"data: {json.dumps({'type': 'content', 'chunk': chunk})}\n\n"
-                    
-                    # Smooth typing speed - faster for better UX
-                    await asyncio.sleep(0.05)  # 50ms between words
-                
+
+                # Stream from Gemini
+                full_chunks = []
+                async for chunk in gemini_integration.stream_response(question, context, history):
+                    if chunk:
+                        full_chunks.append(chunk)
+                        yield f"data: {json.dumps({'type': 'content', 'chunk': chunk})}\n\n"
+
+                response_text = "".join(full_chunks).strip()
                 # Send typing end
                 yield f"data: {json.dumps({'type': 'typing', 'status': 'end'})}\n\n"
-                
-                # Send complete response
-                yield f"data: {json.dumps({'type': 'complete', 'response': response})}\n\n"
-                
-                # Store AI response in database
+                # Send complete
+                yield f"data: {json.dumps({'type': 'complete', 'response': response_text})}\n\n"
+
+                # Store AI response
                 try:
                     ai_msg = models.Conversation(
                         conversation_id=conversation_id,
-                        message=response,
+                        message=response_text,
                         is_user=False,
                         timestamp=datetime.utcnow()
                     )
@@ -443,17 +436,13 @@ async def query_document_stream(
                     logger.info(f"AI response stored for conversation: {conversation_id}")
                 except Exception as e:
                     logger.error(f"Failed to store AI response: {str(e)}")
-                
+
             except Exception as e:
-                logger.error(f"Grok AI generation failed: {str(e)}")
+                logger.error(f"Gemini generation failed: {str(e)}")
                 error_response = "I apologize, but I'm having trouble generating a response right now. Please try again later."
-                
-                # Send error response
                 yield f"data: {json.dumps({'type': 'content', 'chunk': error_response})}\n\n"
                 yield f"data: {json.dumps({'type': 'typing', 'status': 'end'})}\n\n"
                 yield f"data: {json.dumps({'type': 'complete', 'response': error_response})}\n\n"
-                
-                # Store error response in database
                 try:
                     ai_msg = models.Conversation(
                         conversation_id=conversation_id,
